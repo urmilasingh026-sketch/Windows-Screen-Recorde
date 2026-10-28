@@ -6,18 +6,19 @@ the installer includes its license and build information.
 
 ## Build the Windows installer
 
-Run from a Windows x64 machine with Node.js and pnpm installed:
+Build from the Replit workspace, or from a machine with Node.js, pnpm, and
+`makensis` (NSIS) available on `PATH`:
 
 ```sh
 pnpm install
 pnpm --filter @workspace/framecapture run desktop:win
 ```
 
-The NSIS installer is written to `artifacts/framecapture/release/`. It installs
-FrameCapture with a Start menu entry and an optional desktop shortcut. The
-installer is x64; an unsigned build may show a Windows SmartScreen warning.
-The build downloads a pinned Windows FFmpeg binary and verifies its SHA-256
-before including it.
+The x64 NSIS installer is written to `artifacts/framecapture/release/`. It
+installs for the current Windows user, creates Start menu and desktop shortcuts,
+and offers to launch FrameCapture when setup finishes. An unsigned build may
+show a Windows SmartScreen warning. The build downloads a pinned Windows FFmpeg
+binary and verifies its SHA-256 before including it.
 
 To build a portable executable instead, run:
 

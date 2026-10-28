@@ -13,7 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:desktop": "node scripts/build-desktop.mjs",
     "desktop:dev": "node scripts/fetch-win-ffmpeg.mjs && pnpm run build:desktop && electron .",
-    "desktop:win": "node scripts/fetch-win-ffmpeg.mjs && pnpm run build:desktop && electron-builder --win nsis --x64",
+    "desktop:win": "node scripts/fetch-win-ffmpeg.mjs && pnpm run build:desktop && electron-builder --win dir --x64 && node scripts/create-installer.mjs",
     "desktop:win:dir": "node scripts/fetch-win-ffmpeg.mjs && pnpm run build:desktop && electron-builder --win --dir --x64",
     "desktop:portable": "node scripts/fetch-win-ffmpeg.mjs && pnpm run build:desktop && electron-builder --win portable --x64 && node scripts/rename-portable.mjs"
   },
