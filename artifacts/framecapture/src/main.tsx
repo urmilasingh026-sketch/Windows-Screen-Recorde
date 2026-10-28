@@ -7,7 +7,8 @@ import './index.css';
 
 if (
   window.location.hash === '#annotation-canvas' ||
-  window.location.hash === '#annotation-toolbar'
+  window.location.hash === '#annotation-toolbar' ||
+  window.location.hash === '#recording-toolbar'
 ) {
   document.documentElement.classList.add('annotation-window');
   document.body.classList.add('annotation-window');

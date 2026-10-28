@@ -1,1 +1,2 @@
 - [Windows installers on Replit](windows-installer-builds.md) — build the app directory first; compile the user-scope NSIS installer natively to avoid Wine.
+- [Windows recorder triggers](windows-recorder-triggers.md) — toolbox commands arrive in another window; use Electron desktop capture for starts without main-window activation.

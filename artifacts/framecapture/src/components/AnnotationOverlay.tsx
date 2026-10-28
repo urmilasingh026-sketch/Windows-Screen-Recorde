@@ -11,6 +11,7 @@ import {
   Trash2,
   Pause,
   Play,
+  AppWindow,
 } from 'lucide-react';
 import './AnnotationOverlay.css';
 
@@ -21,9 +22,9 @@ export type AnnotationAction =
   | { type: 'undo' }
   | { type: 'clear' };
 
-type RecordingCommand = 'pause' | 'resume' | 'stop';
+type RecordingCommand = 'start' | 'pause' | 'resume' | 'stop' | 'open';
 type RecordingStatus = {
-  state: 'idle' | 'recording' | 'paused' | 'stopping';
+  state: 'idle' | 'starting' | 'recording' | 'paused' | 'stopping';
   elapsedSeconds: number;
 };
 
@@ -184,6 +185,8 @@ export function AnnotationToolbar() {
             ? 'REC'
             : recording.state === 'paused'
               ? 'PAUSED'
+              : recording.state === 'starting'
+                ? 'STARTING'
               : recording.state === 'stopping'
                 ? 'SAVING'
                 : 'READY'}
@@ -227,6 +230,90 @@ export function AnnotationToolbar() {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+export function RecordingToolbar() {
+  const [recording, setRecording] = useState<RecordingStatus>({
+    state: 'idle',
+    elapsedSeconds: 0,
+  });
+
+  useEffect(() => {
+    const overlay = window.annotationOverlay;
+    if (!overlay) return;
+    const unsubscribe = overlay.onRecordingState(setRecording);
+    overlay.requestRecordingState();
+    return unsubscribe;
+  }, []);
+
+  const send = (command: RecordingCommand) => {
+    try {
+      window.annotationOverlay?.sendRecordingControl(command);
+    } catch {
+      // Controls are available in the Windows desktop app only.
+    }
+  };
+
+  const stateLabel = recording.state === 'starting'
+    ? 'Starting…'
+    : recording.state === 'recording'
+      ? 'Recording'
+      : recording.state === 'paused'
+        ? 'Paused'
+        : recording.state === 'stopping'
+          ? 'Saving'
+          : 'Ready';
+
+  return (
+    <div className="recording-floating-toolbar" role="toolbar" aria-label="FrameCapture recording toolbox">
+      <div className="recording-toolbox-brand">
+        <span className={`recording-toolbox-dot${recording.state === 'recording' ? ' is-recording' : recording.state === 'paused' ? ' is-paused' : ''}`} />
+        <span className="recording-toolbox-name">FrameCapture</span>
+        <span className="recording-toolbox-state" role="status" aria-live="polite">{stateLabel}</span>
+        <time className="recording-toolbox-time">{formatRecordingTime(recording.elapsedSeconds)}</time>
+      </div>
+      <div className="recording-toolbox-actions" role="group" aria-label="Recording actions">
+        {recording.state === 'idle' && (
+          <button type="button" className="recording-toolbox-button is-start" aria-label="Start recording" title="Start recording" onClick={() => send('start')}>
+            <Play aria-hidden="true" size={15} fill="currentColor" />
+            <span>Start</span>
+          </button>
+        )}
+        {recording.state === 'starting' && (
+          <button type="button" className="recording-toolbox-button" disabled aria-label="Starting recording">
+            <Play aria-hidden="true" size={15} fill="currentColor" />
+            <span>Starting…</span>
+          </button>
+        )}
+        {recording.state === 'recording' && (
+          <button type="button" className="recording-toolbox-button" aria-label="Pause recording" title="Pause recording" onClick={() => send('pause')}>
+            <Pause aria-hidden="true" size={15} fill="currentColor" />
+            <span>Pause</span>
+          </button>
+        )}
+        {recording.state === 'paused' && (
+          <button type="button" className="recording-toolbox-button is-start" aria-label="Resume recording" title="Resume recording" onClick={() => send('resume')}>
+            <Play aria-hidden="true" size={15} fill="currentColor" />
+            <span>Resume</span>
+          </button>
+        )}
+        {(recording.state === 'recording' || recording.state === 'paused') && (
+          <button type="button" className="recording-toolbox-button is-stop" aria-label="Stop recording" title="Stop and save recording" onClick={() => send('stop')}>
+            <Square aria-hidden="true" size={14} fill="currentColor" />
+            <span>Stop</span>
+          </button>
+        )}
+        {recording.state === 'stopping' && (
+          <button type="button" className="recording-toolbox-button" disabled aria-label="Saving recording">
+            <span>Saving…</span>
+          </button>
+        )}
+        <button type="button" className="recording-toolbox-open" aria-label="Open FrameCapture" title="Open FrameCapture" onClick={() => send('open')}>
+          <AppWindow aria-hidden="true" size={16} />
+        </button>
+      </div>
     </div>
   );
 }

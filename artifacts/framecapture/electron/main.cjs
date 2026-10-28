@@ -4,18 +4,26 @@ const {
   desktopCapturer,
   dialog,
   ipcMain,
+  Menu,
   screen,
   session,
   shell,
+  Tray,
 } = require("electron");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
+const os = require("node:os");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
 const activeRecordings = new Map();
 let mainWindow;
+let recordingToolbarWindow;
+let tray;
+let isQuitting = false;
+let rendererReady = false;
+let queuedRecordingCommand;
 let selectedSourceId;
 let outputDirectory;
 let annotationCanvasWindow;
@@ -108,9 +116,11 @@ function transcodeToMp4(inputPath, outputPath, durationMs) {
       "-c:v",
       "libx264",
       "-preset",
-      "veryfast",
+      "superfast",
       "-crf",
-      "20",
+      "21",
+      "-threads",
+      String(Math.max(1, Math.floor(os.availableParallelism() / 2))),
       "-pix_fmt",
       "yuv420p",
       "-c:a",
@@ -182,6 +192,119 @@ function destroyAnnotationOverlays() {
   for (const overlayWindow of windows) {
     if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy();
   }
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function sendRecordingCommand(command) {
+  if (command === "open") {
+    showMainWindow();
+    return;
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!rendererReady || mainWindow.webContents.isLoading()) {
+    queuedRecordingCommand = command;
+    return;
+  }
+  mainWindow.webContents.send("recording:control", command);
+}
+
+function updateTrayMenu() {
+  if (!tray || tray.isDestroyed()) return;
+  const state = latestRecordingState.state;
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "Open FrameCapture", click: showMainWindow },
+      { type: "separator" },
+      {
+        label: "Start recording",
+        enabled: state === "idle",
+        click: () => sendRecordingCommand("start"),
+      },
+      {
+        label: "Pause recording",
+        enabled: state === "recording",
+        click: () => sendRecordingCommand("pause"),
+      },
+      {
+        label: "Resume recording",
+        enabled: state === "paused",
+        click: () => sendRecordingCommand("resume"),
+      },
+      {
+        label: "Stop and save",
+        enabled: state === "recording" || state === "paused",
+        click: () => sendRecordingCommand("stop"),
+      },
+      { type: "separator" },
+      {
+        label: "Quit FrameCapture",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+}
+
+function createTray() {
+  if (process.platform !== "win32" || tray) return;
+  tray = new Tray(path.join(__dirname, "icon.ico"));
+  tray.setToolTip("FrameCapture");
+  tray.on("click", showMainWindow);
+  tray.on("double-click", showMainWindow);
+  updateTrayMenu();
+}
+
+function createRecordingToolbar(display) {
+  if (process.platform !== "win32" || recordingToolbarWindow) return;
+  const toolbarWidth = 420;
+  const toolbarHeight = 76;
+  recordingToolbarWindow = new BrowserWindow({
+    x: display.bounds.x + Math.round((display.bounds.width - toolbarWidth) / 2),
+    y: display.bounds.y + 22,
+    width: toolbarWidth,
+    height: toolbarHeight,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    movable: true,
+    focusable: true,
+    skipTaskbar: true,
+    webPreferences: {
+      preload: path.join(__dirname, "overlay-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  recordingToolbarWindow.setAlwaysOnTop(true, "screen-saver");
+  recordingToolbarWindow.setContentProtection(true);
+  recordingToolbarWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+  });
+  recordingToolbarWindow.webContents.setWindowOpenHandler(() => ({
+    action: "deny",
+  }));
+  recordingToolbarWindow.once("closed", () => {
+    recordingToolbarWindow = null;
+  });
+  recordingToolbarWindow
+    .loadFile(path.join(__dirname, "../dist/public/index.html"), {
+      hash: "recording-toolbar",
+    })
+    .then(() => recordingToolbarWindow?.showInactive())
+    .catch(() => recordingToolbarWindow?.destroy());
 }
 
 async function openAnnotationOverlays(display) {
@@ -364,7 +487,9 @@ function registerIpcHandlers() {
       event.sender !== mainWindow?.webContents ||
       !event.senderFrame?.url?.startsWith("file://") ||
       !status ||
-      !["idle", "recording", "paused", "stopping"].includes(status.state) ||
+      !["idle", "starting", "recording", "paused", "stopping"].includes(
+        status.state,
+      ) ||
       !Number.isFinite(status.elapsedSeconds)
     ) {
       return;
@@ -386,11 +511,34 @@ function registerIpcHandlers() {
         latestRecordingState,
       );
     }
+    if (recordingToolbarWindow && !recordingToolbarWindow.isDestroyed()) {
+      recordingToolbarWindow.webContents.send(
+        "recording:state",
+        latestRecordingState,
+      );
+    }
+    updateTrayMenu();
+  });
+
+  ipcMain.on("recording:renderer-ready", (event) => {
+    if (
+      event.sender !== mainWindow?.webContents ||
+      !event.senderFrame?.url?.startsWith("file://")
+    ) {
+      return;
+    }
+    rendererReady = true;
+    if (queuedRecordingCommand) {
+      const command = queuedRecordingCommand;
+      queuedRecordingCommand = undefined;
+      sendRecordingCommand(command);
+    }
   });
 
   ipcMain.on("recording:request-state", (event) => {
     if (
-      event.sender !== annotationToolbarWindow?.webContents ||
+      (event.sender !== annotationToolbarWindow?.webContents &&
+        event.sender !== recordingToolbarWindow?.webContents) ||
       !event.senderFrame?.url?.startsWith("file://")
     ) {
       return;
@@ -400,15 +548,18 @@ function registerIpcHandlers() {
 
   ipcMain.on("recording:control", (event, command) => {
     if (
-      event.sender !== annotationToolbarWindow?.webContents ||
+      (event.sender !== annotationToolbarWindow?.webContents &&
+        event.sender !== recordingToolbarWindow?.webContents) ||
       !event.senderFrame?.url?.startsWith("file://") ||
-      !["pause", "resume", "stop"].includes(command) ||
-      !mainWindow ||
-      mainWindow.isDestroyed()
+      !["start", "pause", "resume", "stop", "open"].includes(command)
     ) {
       return;
     }
-    mainWindow.webContents.send("recording:control", command);
+    if (command === "open") {
+      showMainWindow();
+      return;
+    }
+    sendRecordingCommand(command);
   });
 
   ipcMain.handle("settings:get-output-directory", async (event) => {
@@ -485,14 +636,19 @@ function registerIpcHandlers() {
 
   ipcMain.handle("recording:begin", async (event, requestedName) => {
     assertTrustedSender(event);
+    if (activeRecordings.size > 0) {
+      throw new Error("A recording is already in progress.");
+    }
     await fsp.mkdir(outputDirectory, { recursive: true });
 
     const id = randomUUID();
     const stem = safeRecordingName(requestedName);
     const timeLabel = new Date().toISOString().replace(/[:.]/g, "-");
     const baseName = `${stem}-${timeLabel}`;
-    const webmPath = path.join(outputDirectory, `${baseName}-${id}.webm`);
-    const mp4Path = path.join(outputDirectory, `${baseName}.mp4`);
+    const tempDirectory = path.join(app.getPath("temp"), "FrameCapture", "recordings");
+    await fsp.mkdir(tempDirectory, { recursive: true });
+    const webmPath = path.join(tempDirectory, `${baseName}-${id}.webm`);
+    const mp4Path = path.join(outputDirectory, `${baseName}-${id.slice(0, 8)}.mp4`);
     const stream = fs.createWriteStream(webmPath, { flags: "wx" });
 
     await new Promise((resolve, reject) => {
@@ -594,6 +750,7 @@ function registerIpcHandlers() {
 }
 
 function createWindow() {
+  rendererReady = false;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -614,8 +771,15 @@ function createWindow() {
   mainWindow.once("ready-to-show", () => mainWindow.show());
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.loadFile(path.join(__dirname, "../dist/public/index.html"));
+  mainWindow.on("close", (event) => {
+    if (process.platform === "win32" && !isQuitting) {
+      event.preventDefault();
+      mainWindow.hide();
+    }
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
+    rendererReady = false;
     destroyAnnotationOverlays();
   });
 }
@@ -624,10 +788,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.show();
-    mainWindow.focus();
+    showMainWindow();
   });
 
   app.whenReady().then(async () => {
@@ -637,6 +798,15 @@ if (!app.requestSingleInstanceLock()) {
         ? settings.outputDirectory
         : path.join(app.getPath("videos"), "FrameCapture");
     await fsp.mkdir(outputDirectory, { recursive: true });
+
+    session.defaultSession.setPermissionRequestHandler(
+      (webContents, permission, callback) => {
+        const trustedAppRenderer =
+          webContents === mainWindow?.webContents &&
+          webContents.getURL().startsWith("file://");
+        callback(trustedAppRenderer && permission === "media");
+      },
+    );
 
     session.defaultSession.setDisplayMediaRequestHandler(
       async (request, callback) => {
@@ -667,7 +837,19 @@ if (!app.requestSingleInstanceLock()) {
     );
 
     registerIpcHandlers();
+    try {
+      const sources = await getCaptureSources();
+      selectedSourceId =
+        sources.find((source) => source.type === "screen")?.id ||
+        sources[0]?.id;
+    } catch {
+      selectedSourceId = undefined;
+    }
     createWindow();
+    createTray();
+    if (process.platform === "win32") {
+      createRecordingToolbar(screen.getPrimaryDisplay());
+    }
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -675,7 +857,14 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (process.platform !== "darwin" && process.platform !== "win32") app.quit();
 });
 
-app.on("before-quit", destroyAnnotationOverlays);
+app.on("before-quit", () => {
+  isQuitting = true;
+  if (tray && !tray.isDestroyed()) tray.destroy();
+  if (recordingToolbarWindow && !recordingToolbarWindow.isDestroyed()) {
+    recordingToolbarWindow.destroy();
+  }
+  destroyAnnotationOverlays();
+});

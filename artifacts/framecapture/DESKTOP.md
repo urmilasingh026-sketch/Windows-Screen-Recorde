@@ -20,6 +20,15 @@ and offers to launch FrameCapture when setup finishes. An unsigned build may
 show a Windows SmartScreen warning. The build downloads a pinned Windows FFmpeg
 binary and verifies its SHA-256 before including it.
 
+The Windows app saves completed recordings as MP4. It also opens a floating
+recording toolbox and a system-tray menu for starting, pausing, resuming, and
+stopping captures without returning to the main window. Closing the main window
+hides FrameCapture in the tray; use the tray menu to quit completely.
+
+Browser preview output uses MP4 only when the browser supports MP4 recording;
+otherwise it clearly falls back to WebM. Use the Windows desktop app for
+consistent MP4 export.
+
 To build a portable executable instead, run:
 
 ```sh

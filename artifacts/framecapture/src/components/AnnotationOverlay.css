@@ -71,6 +71,62 @@
   transform: none;
 }
 
+.recording-floating-toolbar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 12px;
+  border: 1px solid rgba(176, 183, 205, .2);
+  border-radius: 15px;
+  color: #eef2ee;
+  background: rgba(20, 34, 29, .97);
+  box-shadow: 0 12px 36px rgba(9, 11, 17, .34), inset 0 1px 0 rgba(255, 255, 255, .05);
+  font-family: var(--app-font-sans);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.recording-toolbox-brand,
+.recording-toolbox-actions {
+  display: flex;
+  align-items: center;
+}
+
+.recording-toolbox-brand { min-width: 0; gap: 8px; }
+.recording-toolbox-name { color: #f2f4f0; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.recording-toolbox-state { color: #b8c7bd; font: 10px var(--app-font-mono); white-space: nowrap; }
+.recording-toolbox-time { color: #dce6de; font: 10px var(--app-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.recording-toolbox-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #89948d; }
+.recording-toolbox-dot.is-recording { background: #f2415a; box-shadow: 0 0 0 3px rgba(242, 65, 90, .16); }
+.recording-toolbox-dot.is-paused { background: #ffc928; box-shadow: 0 0 0 3px rgba(255, 201, 40, .15); }
+.recording-toolbox-actions { gap: 5px; -webkit-app-region: no-drag; }
+.recording-toolbox-button,
+.recording-toolbox-open {
+  height: 35px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 9px;
+  color: #eaf0eb;
+  background: rgba(255, 255, 255, .08);
+  font: 700 11px var(--app-font-sans);
+  white-space: nowrap;
+}
+.recording-toolbox-button:hover,
+.recording-toolbox-open:hover { background: rgba(255, 255, 255, .16); }
+.recording-toolbox-button.is-start { color: #153b2c; background: #b7e1c8; border-color: #b7e1c8; }
+.recording-toolbox-button.is-start:hover { background: #c9ebd5; }
+.recording-toolbox-button.is-stop { color: #ff8791; }
+.recording-toolbox-button:disabled { opacity: .55; }
+.recording-toolbox-open { width: 35px; padding: 0; }
+.recording-floating-toolbar button:focus-visible { outline: 2px solid #f1f2ff; outline-offset: 2px; }
+
 .annotation-tool-group,
 .annotation-color-group,
 .annotation-command-group {

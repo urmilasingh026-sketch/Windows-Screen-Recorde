@@ -16,11 +16,11 @@ import {
   Video,
   AppWindow,
 } from 'lucide-react';
-import { AnnotationCanvas, AnnotationToolbar } from './components/AnnotationOverlay';
+import { AnnotationCanvas, AnnotationToolbar, RecordingToolbar } from './components/AnnotationOverlay';
 
 type Source = { id: string; name: string; type: 'screen' | 'window'; thumbnail: string; displayId?: string };
 type Recording = { id: string; name: string; path: string; createdAt: string; size: number; duration: number };
-type RecordingCommand = 'pause' | 'resume' | 'stop';
+type RecordingCommand = 'start' | 'pause' | 'resume' | 'stop';
 type FrameCaptureBridge = {
   getSources(): Promise<Source[]>;
   selectSource(id: string): Promise<void>;
@@ -37,12 +37,13 @@ type FrameCaptureBridge = {
   onExportProgress(callback: (progress: number) => void): () => void;
   reportRecordingState(state: RecordState, elapsedSeconds: number): void;
   onRecordingControl(callback: (command: RecordingCommand) => void): () => void;
+  rendererReady(): void;
 };
 declare global {
   interface Window { frameCapture?: FrameCaptureBridge }
 }
 type Mode = 'screen' | 'window';
-type RecordState = 'idle' | 'recording' | 'paused' | 'stopping';
+type RecordState = 'idle' | 'starting' | 'recording' | 'paused' | 'stopping';
 
 const prettyTime = (seconds: number) => {
   const h = Math.floor(seconds / 3600);
@@ -77,12 +78,16 @@ function App() {
   const activeStream = useRef<MediaStream | null>(null);
   const micStream = useRef<MediaStream | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
+  const audioSources = useRef<MediaStreamAudioSourceNode[]>([]);
+  const mixedAudioStream = useRef<MediaStream | null>(null);
   const recordingId = useRef('');
   const browserChunks = useRef<Blob[]>([]);
   const startedAt = useRef(0);
   const carryTime = useRef(0);
   const pendingWrites = useRef<Promise<void>[]>([]);
   const stoppingRef = useRef(false);
+  const recordingLock = useRef(false);
+  const startRecordingRef = useRef<(fromToolbox?: boolean) => Promise<void>>(async () => undefined);
   const chunkWriteFailed = useRef(false);
   const elapsedSeconds = Math.floor(elapsed);
 
@@ -174,56 +179,105 @@ function App() {
   const stopTracks = () => {
     activeStream.current?.getTracks().forEach((track) => track.stop());
     micStream.current?.getTracks().forEach((track) => track.stop());
-    if (audioContext.current) void audioContext.current.close().catch(() => undefined);
+    mixedAudioStream.current?.getTracks().forEach((track) => track.stop());
+    audioSources.current.forEach((source) => {
+      try { source.disconnect(); } catch { /* already disconnected */ }
+    });
+    audioSources.current = [];
+    mixedAudioStream.current = null;
     activeStream.current = null;
     micStream.current = null;
-    audioContext.current = null;
   };
 
   const saveBrowserRecording = (blob: Blob, name: string, duration: number) => {
+    const extension = blob.type.toLowerCase().includes('mp4') ? 'mp4' : 'webm';
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${name}.webm`;
+    link.download = `${name}.${extension}`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     const item: Recording = {
-      id: `local-${Date.now()}`, name: `${name}.webm`, path: 'Downloads',
+      id: `local-${Date.now()}`, name: `${name}.${extension}`, path: 'Downloads',
       createdAt: new Date().toISOString(), size: blob.size, duration,
     };
     setRecordings((current) => [item, ...current]);
   };
 
-  const startRecording = async () => {
+  const startRecording = async (fromToolbox = false) => {
+    if (recordingLock.current) return;
+    recordingLock.current = true;
+    setState('starting');
     setError('');
-    if (!navigator.mediaDevices?.getDisplayMedia) {
+    setStatus(fromToolbox ? 'Starting from the floating toolbox…' : 'Preparing capture…');
+    if (
+      !navigator.mediaDevices ||
+      (fromToolbox && !navigator.mediaDevices.getUserMedia) ||
+      (!fromToolbox && !navigator.mediaDevices.getDisplayMedia)
+    ) {
       setError('Screen capture is unavailable in this browser. Open FrameCapture on a supported desktop browser.');
+      setState('idle');
+      recordingLock.current = false;
       return;
     }
     if (annotationsEnabled && (!bridge || mode !== 'screen')) {
       setError('On-screen drawing is available in the Windows desktop app when recording a screen.');
+      setState('idle');
+      recordingLock.current = false;
       return;
     }
     let annotationOverlayOpened = false;
     try {
+      let captureSourceId = selectedId;
+      if (bridge && fromToolbox && !captureSourceId) {
+        const available = await bridge.getSources();
+        const initialSource = available.find((source) => source.type === 'screen') ?? available[0];
+        if (!initialSource) throw new Error('No screen or window is available to record.');
+        captureSourceId = initialSource.id;
+        setSources(available);
+        setSelectedId(initialSource.id);
+        await bridge.selectSource(initialSource.id);
+      }
+      if (fromToolbox && bridge && !captureSourceId) {
+        throw new Error('Choose a capture source in FrameCapture before starting from the toolbox.');
+      }
       if (annotationsEnabled && bridge) {
-        await bridge.openAnnotationOverlay(selectedId);
+        await bridge.openAnnotationOverlay(captureSourceId);
         annotationOverlayOpened = true;
       }
-      setStatus('Choose a screen or window in the capture prompt…');
+      setStatus(fromToolbox ? 'Connecting to the selected screen…' : 'Choose a screen or window in the capture prompt…');
       const quality = resolution === '4K' ? { width: 3840, height: 2160 } : resolution === '1440p' ? { width: 2560, height: 1440 } : { width: 1920, height: 1080 };
       const targetFps = Number(fps);
-      if (microphone || systemAudio) audioContext.current = new AudioContext();
-      const display = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          width: { ideal: quality.width, max: quality.width },
-          height: { ideal: quality.height, max: quality.height },
-          frameRate: { ideal: targetFps, max: targetFps },
-        },
-        audio: systemAudio,
-      });
+      const display = bridge && fromToolbox
+        ? await navigator.mediaDevices.getUserMedia({
+            video: {
+              mandatory: {
+                chromeMediaSource: 'desktop',
+                chromeMediaSourceId: captureSourceId,
+                maxWidth: quality.width,
+                maxHeight: quality.height,
+                maxFrameRate: targetFps,
+              },
+            },
+            audio: systemAudio
+              ? {
+                  mandatory: {
+                    chromeMediaSource: 'desktop',
+                    chromeMediaSourceId: captureSourceId,
+                  },
+                }
+              : false,
+          } as unknown as MediaStreamConstraints)
+        : await navigator.mediaDevices.getDisplayMedia({
+            video: {
+              width: { ideal: quality.width, max: quality.width },
+              height: { ideal: quality.height, max: quality.height },
+              frameRate: { ideal: targetFps, max: targetFps },
+            },
+            audio: systemAudio,
+          });
       activeStream.current = display;
       const videoTrack = display.getVideoTracks()[0];
       if (videoTrack) videoTrack.contentHint = 'detail';
@@ -244,21 +298,45 @@ function App() {
         (typeof actualFps === 'number' && actualFps + 2 < targetFps);
       if (microphone) {
         try {
-          micStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+          micStream.current = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
         } catch {
           setError('Screen capture started, but microphone access was denied. Recording will continue without microphone audio.');
         }
       }
-      const audioTracks = [...display.getAudioTracks(), ...(micStream.current?.getAudioTracks() ?? [])];
-      let combined = new MediaStream(display.getVideoTracks());
-      if (audioTracks.length && audioContext.current) {
-        if (audioContext.current.state === 'suspended') await audioContext.current.resume();
-        const destination = audioContext.current.createMediaStreamDestination();
-        for (const track of audioTracks) {
-          const source = audioContext.current.createMediaStreamSource(new MediaStream([track]));
-          source.connect(destination);
+      const systemAudioTracks = display.getAudioTracks();
+      const microphoneTracks = micStream.current?.getAudioTracks() ?? [];
+      if (systemAudio && systemAudioTracks.length === 0) {
+        setError('System audio was not provided by the selected source. Check Windows audio capture permissions and try again.');
+      }
+      const audioTracks = [...systemAudioTracks, ...microphoneTracks];
+      const combined = new MediaStream(display.getVideoTracks());
+      if (audioTracks.length === 1) {
+        combined.addTrack(audioTracks[0]);
+      } else if (audioTracks.length > 1) {
+        const context = audioContext.current ?? new AudioContext();
+        audioContext.current = context;
+        if (context.state === 'suspended') {
+          try { await context.resume(); } catch { /* fall back to a single audio input below */ }
         }
-        combined = new MediaStream([...display.getVideoTracks(), ...destination.stream.getAudioTracks()]);
+        if (context.state !== 'running') {
+          combined.addTrack(microphoneTracks[0] ?? systemAudioTracks[0]);
+          setError('Microphone and system audio could not be mixed. Recording one available audio source instead.');
+        } else {
+          const destination = context.createMediaStreamDestination();
+        for (const track of audioTracks) {
+          const source = context.createMediaStreamSource(new MediaStream([track]));
+          source.connect(destination);
+          audioSources.current.push(source);
+        }
+          mixedAudioStream.current = destination.stream;
+          destination.stream.getAudioTracks().forEach((track) => combined.addTrack(track));
+        }
       }
       const requestedName = `Capture ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).replace(':', '-')}`;
       let id = '';
@@ -267,12 +345,22 @@ function App() {
         id = begun.id;
         recordingId.current = id;
       } else browserChunks.current = [];
-      const preferred = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type));
+      const browserMp4Types = bridge ? [] : [
+        'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+        'video/mp4;codecs=avc1',
+        'video/mp4',
+      ];
+      const preferred = [
+        ...browserMp4Types,
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+      ].find((type) => MediaRecorder.isTypeSupported(type));
       const videoBitsPerSecond = resolution === '4K'
-        ? (targetFps >= 60 ? 50_000_000 : 32_000_000)
+        ? (targetFps >= 60 ? 40_000_000 : 26_000_000)
         : resolution === '1440p'
-          ? (targetFps >= 60 ? 28_000_000 : 18_000_000)
-          : (targetFps >= 60 ? 16_000_000 : 10_000_000);
+          ? (targetFps >= 60 ? 24_000_000 : 16_000_000)
+          : (targetFps >= 60 ? 14_000_000 : 8_000_000);
       const recorderOptions: MediaRecorderOptions = {
         ...(preferred ? { mimeType: preferred } : {}),
         videoBitsPerSecond,
@@ -308,7 +396,9 @@ function App() {
           } else {
             const blob = new Blob(browserChunks.current, { type: recorder.mimeType || 'video/webm' });
             saveBrowserRecording(blob, requestedName, carryTime.current);
-            setStatus('WebM downloaded to your browser’s Downloads folder');
+            setStatus(blob.type.toLowerCase().includes('mp4')
+              ? 'MP4 downloaded to your browser’s Downloads folder'
+              : 'This browser cannot record MP4; WebM downloaded to your browser’s Downloads folder');
           }
         } catch {
           setError('The recording could not be finalized. Check the output location and available disk space.');
@@ -319,6 +409,7 @@ function App() {
           mediaRecorder.current = null;
           setState('idle');
           stoppingRef.current = false;
+            recordingLock.current = false;
         }
       };
       display.getVideoTracks()[0]?.addEventListener('ended', () => {
@@ -327,7 +418,7 @@ function App() {
       carryTime.current = 0;
       startedAt.current = Date.now();
       setElapsed(0);
-      recorder.start(1000);
+      recorder.start(2500);
       setState('recording');
       const captureStatus = `${bridge ? 'Recording' : 'Browser preview'} · ${captureSummary}${captureLimited ? ` · source/PC below ${resolution} at ${targetFps} FPS` : ''}`;
       setStatus(captureStatus);
@@ -336,6 +427,8 @@ function App() {
         await bridge.closeAnnotationOverlay().catch(() => undefined);
       }
       stopTracks();
+      setState('idle');
+      recordingLock.current = false;
       if (problem instanceof DOMException && problem.name === 'NotAllowedError') {
         setStatus('Capture was cancelled');
       } else {
@@ -345,8 +438,10 @@ function App() {
         await bridge.cancelRecording(recordingId.current).catch(() => undefined);
         recordingId.current = '';
       }
+      recordingLock.current = false;
     }
   };
+  startRecordingRef.current = startRecording;
 
   const pauseRecording = useCallback(() => {
     const recorder = mediaRecorder.current;
@@ -381,11 +476,17 @@ function App() {
   useEffect(() => {
     if (!bridge) return;
     return bridge.onRecordingControl((command) => {
-      if (command === 'pause') pauseRecording();
+      if (command === 'start') void startRecordingRef.current(true);
+      else if (command === 'pause') pauseRecording();
       else if (command === 'resume') resumeRecording();
       else if (command === 'stop') void stopRecording();
     });
   }, [bridge, pauseRecording, resumeRecording, stopRecording]);
+
+  useEffect(() => {
+    if (!bridge) return;
+    bridge.rendererReady();
+  }, [bridge]);
 
   const reveal = async (item: Recording) => {
     if (bridge) {
@@ -399,7 +500,7 @@ function App() {
   const visibleSources = sources.filter((source) => source.type === mode);
   const selectedSource = sources.find((source) => source.id === selectedId);
   const canAnnotate = Boolean(bridge && selectedSource?.type === 'screen');
-  const active = state === 'recording' || state === 'paused' || state === 'stopping';
+  const active = state === 'starting' || state === 'recording' || state === 'paused' || state === 'stopping';
 
   return (
     <div className="app-shell">
@@ -410,7 +511,7 @@ function App() {
         </div>
         <div className="top-meta">
           <span><i className="status-led" />{bridge ? 'Capture engine ready' : 'Browser capture preview'}</span>
-          <span>LOCAL · MP4</span>
+          <span>{bridge ? 'LOCAL · MP4' : 'BROWSER · MP4 IF SUPPORTED'}</span>
           {import.meta.env.DEV && (
             <a
               className="download-app-link"
@@ -432,7 +533,7 @@ function App() {
             <h1>Make the moment clear.</h1>
             <p className="intro-copy">Choose what to capture. We’ll take care of the rest.</p>
           </div>
-          {!bridge && <div className="preview-badge" data-testid="status-browser-preview">BROWSER PREVIEW · WEBM DOWNLOADS</div>}
+          {!bridge && <div className="preview-badge" data-testid="status-browser-preview">BROWSER PREVIEW · MP4 IF SUPPORTED</div>}
         </div>
 
         <div className="workspace">
@@ -479,7 +580,17 @@ function App() {
               <div className="divider" />
               <div className="toggle-row">
                 <div className="toggle-copy">Microphone <small>Include your voice</small></div>
-                <button type="button" role="switch" aria-checked={microphone} className={`switch ${microphone ? 'on' : ''}`} onClick={() => setMicrophone(!microphone)} data-testid="toggle-microphone"><span className="switch-thumb" /></button>
+                <button type="button" role="switch" aria-checked={microphone} className={`switch ${microphone ? 'on' : ''}`} onClick={() => {
+                  const enabled = !microphone;
+                  setMicrophone(enabled);
+                  if (enabled) {
+                    try {
+                      const context = audioContext.current ?? new AudioContext();
+                      audioContext.current = context;
+                      if (context.state === 'suspended') void context.resume().catch(() => undefined);
+                    } catch { setError('The browser could not prepare microphone audio mixing.'); }
+                  }
+                }} data-testid="toggle-microphone"><span className="switch-thumb" /></button>
               </div>
               <div className="toggle-row">
                 <div className="toggle-copy">System audio <small>Capture audio from the source</small></div>
@@ -504,11 +615,12 @@ function App() {
         <section className="control-panel" aria-label="Recording controls">
           <div className="record-state">
             <span className={`record-indicator ${state === 'recording' ? 'recording' : ''}`}>{state === 'recording' ? <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'currentColor' }} /> : <Video size={17} />}</span>
-            <div className="record-copy"><strong data-testid="status-recording-state">{state === 'recording' ? 'Recording in progress' : state === 'paused' ? 'Recording paused' : state === 'stopping' ? 'Saving your capture' : 'Ready when you are'}</strong>
+            <div className="record-copy"><strong data-testid="status-recording-state">{state === 'starting' ? 'Starting capture…' : state === 'recording' ? 'Recording in progress' : state === 'paused' ? 'Recording paused' : state === 'stopping' ? 'Saving your capture' : 'Ready when you are'}</strong>
               <span data-testid="text-recording-timer">{prettyTime(elapsed)}{state === 'recording' ? '  ·  REC' : ''}</span></div>
           </div>
           <div className="record-buttons">
             {!active && <button type="button" className="primary-button" onClick={() => void startRecording()} disabled={!selectedId && !!bridge} data-testid="button-start-recording"><Play size={14} fill="currentColor" /> Start recording</button>}
+            {state === 'starting' && <button type="button" className="secondary-button" disabled data-testid="button-starting-recording"><RefreshCw size={13} /> Starting…</button>}
             {(state === 'idle' || state === 'recording') && <button type="button" className="secondary-button" onClick={pauseRecording} disabled={state !== 'recording'} data-testid="button-pause-recording"><Pause size={14} fill="currentColor" /> Pause</button>}
             {state === 'paused' && <button type="button" className="primary-button" onClick={resumeRecording} data-testid="button-resume-recording"><Play size={14} fill="currentColor" /> Resume</button>}
             {(state === 'recording' || state === 'paused') && <button type="button" className="danger-button" onClick={() => void stopRecording()} data-testid="button-stop-recording"><Square size={13} fill="currentColor" /> Stop</button>}
@@ -544,5 +656,6 @@ function AnnotationWindow({ surface }: { surface: 'canvas' | 'toolbar' }) {
 export default function AppEntry() {
   if (window.location.hash === '#annotation-canvas') return <AnnotationWindow surface="canvas" />;
   if (window.location.hash === '#annotation-toolbar') return <AnnotationWindow surface="toolbar" />;
+  if (window.location.hash === '#recording-toolbar') return <RecordingToolbar />;
   return <App />;
 }
