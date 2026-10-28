@@ -225,14 +225,23 @@ function App() {
         audio: systemAudio,
       });
       activeStream.current = display;
-      const captureSettings = display.getVideoTracks()[0]?.getSettings();
-      const capturedSize = captureSettings?.width && captureSettings?.height
-        ? `${captureSettings.width} × ${captureSettings.height}`
-        : `up to ${resolution}`;
-      const capturedFps = captureSettings?.frameRate
-        ? Math.round(captureSettings.frameRate)
-        : targetFps;
-      const captureSummary = `${capturedSize} · ${capturedFps} FPS`;
+      const videoTrack = display.getVideoTracks()[0];
+      if (videoTrack) videoTrack.contentHint = 'detail';
+      const captureSettings = videoTrack?.getSettings();
+      const capturedWidth = captureSettings?.width;
+      const capturedHeight = captureSettings?.height;
+      const actualFps = captureSettings?.frameRate;
+      const capturedSize = capturedWidth && capturedHeight
+        ? `${capturedWidth} × ${capturedHeight}`
+        : `${resolution} requested`;
+      const capturedFps = typeof actualFps === 'number' && actualFps > 0
+        ? `${Math.round(actualFps)} FPS`
+        : `${targetFps} FPS requested`;
+      const captureSummary = `${capturedSize} · ${capturedFps}`;
+      const captureLimited =
+        (Boolean(capturedWidth && capturedHeight) &&
+          (capturedWidth! < quality.width || capturedHeight! < quality.height)) ||
+        (typeof actualFps === 'number' && actualFps + 2 < targetFps);
       if (microphone) {
         try {
           micStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -259,7 +268,17 @@ function App() {
         recordingId.current = id;
       } else browserChunks.current = [];
       const preferred = ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type));
-      const recorder = new MediaRecorder(combined, preferred ? { mimeType: preferred } : undefined);
+      const videoBitsPerSecond = resolution === '4K'
+        ? (targetFps >= 60 ? 50_000_000 : 32_000_000)
+        : resolution === '1440p'
+          ? (targetFps >= 60 ? 28_000_000 : 18_000_000)
+          : (targetFps >= 60 ? 16_000_000 : 10_000_000);
+      const recorderOptions: MediaRecorderOptions = {
+        ...(preferred ? { mimeType: preferred } : {}),
+        videoBitsPerSecond,
+        ...(audioTracks.length ? { audioBitsPerSecond: 192_000 } : {}),
+      };
+      const recorder = new MediaRecorder(combined, recorderOptions);
       mediaRecorder.current = recorder;
       pendingWrites.current = [];
       chunkWriteFailed.current = false;
@@ -310,7 +329,8 @@ function App() {
       setElapsed(0);
       recorder.start(1000);
       setState('recording');
-      setStatus(bridge ? `Recording · ${captureSummary}` : `Browser preview · ${captureSummary}`);
+      const captureStatus = `${bridge ? 'Recording' : 'Browser preview'} · ${captureSummary}${captureLimited ? ` · source/PC below ${resolution} at ${targetFps} FPS` : ''}`;
+      setStatus(captureStatus);
     } catch (problem) {
       if (annotationOverlayOpened && bridge) {
         await bridge.closeAnnotationOverlay().catch(() => undefined);
@@ -469,7 +489,7 @@ function App() {
                 <div className="toggle-copy">Draw on screen <small>{canAnnotate ? 'Show annotation tools while recording' : 'Windows desktop app · screen capture only'}</small></div>
                 <button type="button" role="switch" aria-checked={annotationsEnabled} aria-label="Draw on screen" className={`switch ${annotationsEnabled ? 'on' : ''}`} onClick={() => setAnnotationsEnabled(!annotationsEnabled)} disabled={!canAnnotate || active} data-testid="toggle-screen-annotations"><span className="switch-thumb" /></button>
               </div>
-              <div className="capability-note" data-testid="note-hardware-capability"><AlertTriangle size={14} /><span>4K at 60 FPS needs capable graphics hardware and fast storage. Available performance varies by PC.</span></div>
+              <div className="capability-note" data-testid="note-hardware-capability"><AlertTriangle size={14} /><span>Resolution and FPS are capture targets. The status line shows what the display and PC actually provide.</span></div>
             </section>
             <section className="panel output-panel">
               <div className="section-head"><h2 className="section-title"><span className="step-num">03</span> Save location</h2></div>

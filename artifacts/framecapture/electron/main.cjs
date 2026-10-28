@@ -23,6 +23,7 @@ let annotationToolbarWindow;
 let latestRecordingState = { state: "idle", elapsedSeconds: 0 };
 
 if (process.platform === "win32") {
+  app.setName("FrameCapture");
   app.setAppUserModelId("app.framecapture.recorder");
 }
 
@@ -619,48 +620,59 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(async () => {
-  const settings = await readSettings();
-  outputDirectory =
-    typeof settings.outputDirectory === "string" && settings.outputDirectory
-      ? settings.outputDirectory
-      : path.join(app.getPath("videos"), "FrameCapture");
-  await fsp.mkdir(outputDirectory, { recursive: true });
-
-  session.defaultSession.setDisplayMediaRequestHandler(
-    async (request, callback) => {
-      try {
-        const sources = await desktopCapturer.getSources({
-          types: ["screen", "window"],
-          thumbnailSize: { width: 0, height: 0 },
-        });
-        const source =
-          sources.find((candidate) => candidate.id === selectedSourceId) ||
-          sources.find((candidate) => candidate.id.startsWith("screen:"));
-        if (!source) {
-          callback(null);
-          return;
-        }
-
-        callback({
-          video: source,
-          ...(request.audioRequested && process.platform === "win32"
-            ? { audio: "loopback" }
-            : {}),
-        });
-      } catch {
-        callback(null);
-      }
-    },
-    { useSystemPicker: false },
-  );
-
-  registerIpcHandlers();
-  createWindow();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
   });
-});
+
+  app.whenReady().then(async () => {
+    const settings = await readSettings();
+    outputDirectory =
+      typeof settings.outputDirectory === "string" && settings.outputDirectory
+        ? settings.outputDirectory
+        : path.join(app.getPath("videos"), "FrameCapture");
+    await fsp.mkdir(outputDirectory, { recursive: true });
+
+    session.defaultSession.setDisplayMediaRequestHandler(
+      async (request, callback) => {
+        try {
+          const sources = await desktopCapturer.getSources({
+            types: ["screen", "window"],
+            thumbnailSize: { width: 0, height: 0 },
+          });
+          const source =
+            sources.find((candidate) => candidate.id === selectedSourceId) ||
+            sources.find((candidate) => candidate.id.startsWith("screen:"));
+          if (!source) {
+            callback(null);
+            return;
+          }
+
+          callback({
+            video: source,
+            ...(request.audioRequested && process.platform === "win32"
+              ? { audio: "loopback" }
+              : {}),
+          });
+        } catch {
+          callback(null);
+        }
+      },
+      { useSystemPicker: false },
+    );
+
+    registerIpcHandlers();
+    createWindow();
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  });
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

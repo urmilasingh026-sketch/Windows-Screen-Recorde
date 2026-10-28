@@ -1,6 +1,6 @@
 {
   "name": "@workspace/framecapture",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "A local Windows screen recorder with 4K and 60 FPS capture presets.",
@@ -126,7 +126,6 @@
       "allowToChangeInstallationDirectory": true,
       "allowElevation": false,
       "perMachine": false,
-      "script": "electron/installer.nsi",
       "installerIcon": "electron/icon.ico",
       "uninstallerIcon": "electron/icon.ico",
       "installerHeaderIcon": "electron/icon.ico",

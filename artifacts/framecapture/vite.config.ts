@@ -36,12 +36,12 @@ const windowsDownloadPlugin: Plugin = {
         fileStats = statSync(windowsInstallerPath);
       } catch {
         response.statusCode = 404;
-        response.end('The Windows portable build is not available.');
+        response.end('The Windows installer is not built yet. Run the desktop:win package script first.');
         return;
       }
       if (!fileStats.isFile()) {
         response.statusCode = 404;
-        response.end('The Windows portable build is not available.');
+        response.end('The Windows installer is not built yet. Run the desktop:win package script first.');
         return;
       }
 
