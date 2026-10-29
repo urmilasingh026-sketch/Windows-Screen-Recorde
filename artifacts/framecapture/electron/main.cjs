@@ -94,13 +94,29 @@ async function getCaptureSources() {
     fetchWindowIcons: true,
   });
 
-  return sources.map((source) => ({
-    id: source.id,
-    name: source.name,
-    type: source.id.startsWith("screen:") ? "screen" : "window",
-    thumbnail: source.thumbnail.toDataURL(),
-    displayId: source.display_id || undefined,
-  }));
+  const displays = screen.getAllDisplays();
+  return sources.map((source) => {
+    const type = source.id.startsWith("screen:") ? "screen" : "window";
+    const display =
+      type === "screen" && source.display_id
+        ? displays.find(
+            (candidate) => String(candidate.id) === source.display_id,
+          )
+        : undefined;
+    return {
+      id: source.id,
+      name: source.name,
+      type,
+      thumbnail: source.thumbnail.toDataURL(),
+      displayId: source.display_id || undefined,
+      width: display
+        ? Math.round(display.size.width * display.scaleFactor)
+        : undefined,
+      height: display
+        ? Math.round(display.size.height * display.scaleFactor)
+        : undefined,
+    };
+  });
 }
 
 function getFfmpegPath() {
@@ -190,13 +206,23 @@ function transcodeToMp4(inputPath, outputPath, durationMs) {
   });
 }
 
-function destroyAnnotationOverlays() {
+function syncRecordingToolbarVisibility() {
+  if (!recordingToolbarWindow || recordingToolbarWindow.isDestroyed()) return;
+  if (annotationToolbarWindow && !annotationToolbarWindow.isDestroyed()) {
+    recordingToolbarWindow.hide();
+  } else if (!isQuitting) {
+    recordingToolbarWindow.showInactive();
+  }
+}
+
+function destroyAnnotationOverlays(restoreRecordingToolbar = true) {
   const windows = [annotationToolbarWindow, annotationCanvasWindow];
   annotationToolbarWindow = null;
   annotationCanvasWindow = null;
   for (const overlayWindow of windows) {
     if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.destroy();
   }
+  if (restoreRecordingToolbar) syncRecordingToolbarVisibility();
 }
 
 function showMainWindow() {
@@ -308,12 +334,12 @@ function createRecordingToolbar(display) {
     .loadFile(path.join(__dirname, "../dist/public/index.html"), {
       hash: "recording-toolbar",
     })
-    .then(() => recordingToolbarWindow?.showInactive())
+    .then(() => syncRecordingToolbarVisibility())
     .catch(() => recordingToolbarWindow?.destroy());
 }
 
 async function openAnnotationOverlays(display) {
-  destroyAnnotationOverlays();
+  destroyAnnotationOverlays(false);
   const preloadPath = path.join(__dirname, "overlay-preload.cjs");
   const overlayPage = path.join(__dirname, "../dist/public/index.html");
   const bounds = display.bounds;
@@ -385,6 +411,7 @@ async function openAnnotationOverlays(display) {
     });
     annotationCanvasWindow.showInactive();
     annotationToolbarWindow.showInactive();
+    syncRecordingToolbarVisibility();
   } catch (error) {
     destroyAnnotationOverlays();
     throw error;
@@ -527,6 +554,7 @@ function registerIpcHandlers() {
       );
     }
     updateTrayMenu();
+    syncRecordingToolbarVisibility();
     if (status.state === "idle" && latestRecordingState.error) {
       showMainWindow();
     }

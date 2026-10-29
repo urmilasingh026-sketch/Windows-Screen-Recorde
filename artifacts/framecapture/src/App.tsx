@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { AnnotationCanvas, AnnotationToolbar, RecordingToolbar } from './components/AnnotationOverlay';
 
-type Source = { id: string; name: string; type: 'screen' | 'window'; thumbnail: string; displayId?: string };
+type Source = { id: string; name: string; type: 'screen' | 'window'; thumbnail: string; displayId?: string; width?: number; height?: number };
 type Recording = { id: string; name: string; path: string; createdAt: string; size: number; duration: number };
 type RecordingCommand = 'start' | 'pause' | 'resume' | 'stop';
 type FrameCaptureBridge = {
@@ -306,7 +306,7 @@ function App() {
       const capturedFps = typeof actualFps === 'number' && actualFps > 0
         ? `${Math.round(actualFps)} FPS`
         : `${targetFps} FPS requested`;
-      const captureSummary = `${capturedSize} · ${capturedFps}`;
+      const captureSummary = `${capturedSize} · ${typeof actualFps === 'number' && actualFps > 0 ? `${actualFps.toFixed(1)} FPS` : `${targetFps} FPS requested`}`;
       const captureLimited =
         (Boolean(capturedWidth && capturedHeight) &&
           (capturedWidth! < quality.width || capturedHeight! < quality.height)) ||
@@ -435,7 +435,7 @@ function App() {
       setElapsed(0);
       recorder.start(2500);
       setState('recording');
-      const captureStatus = `${bridge ? 'Recording' : 'Browser preview'} · ${captureSummary}${captureLimited ? ` · source/PC below ${resolution} at ${targetFps} FPS` : ''}`;
+      const captureStatus = `${bridge ? 'Recording' : 'Browser preview'} · Captured ${captureSummary} · Target ${resolution} at ${targetFps} FPS${captureLimited ? ' · display or PC limit' : ''}`;
       setStatus(captureStatus);
     } catch (problem) {
       if (annotationOverlayOpened && bridge) {
@@ -515,6 +515,18 @@ function App() {
   const visibleSources = sources.filter((source) => source.type === mode);
   const selectedSource = sources.find((source) => source.id === selectedId);
   const canAnnotate = Boolean(bridge && selectedSource?.type === 'screen');
+  const targetDimensions = resolution === '4K'
+    ? { width: 3840, height: 2160 }
+    : resolution === '1440p'
+      ? { width: 2560, height: 1440 }
+      : { width: 1920, height: 1080 };
+  const selectedDisplayBelowTarget = Boolean(
+    selectedSource?.type === 'screen' &&
+    selectedSource.width &&
+    selectedSource.height &&
+    (selectedSource.width < targetDimensions.width ||
+      selectedSource.height < targetDimensions.height),
+  );
   const active = state === 'starting' || state === 'recording' || state === 'paused' || state === 'stopping';
 
   return (
@@ -570,7 +582,7 @@ function App() {
                     {source.thumbnail ? <img src={source.thumbnail} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <div className={source.type === 'screen' ? 'thumb-desktop' : 'thumb-window'} />}
                     {selectedId === source.id && <span className="selected-check" style={{ position: 'absolute', right: 9, top: 9, width: 22, height: 22, background: '#faf9f3', borderRadius: 20, display: 'grid', placeItems: 'center' }}><Check size={13} /></span>}
                   </div>
-                  <div className="source-info"><span className="source-name">{source.name}</span><span className="source-detail">{source.type === 'screen' ? 'DISPLAY' : 'WINDOW'}</span></div>
+                  <div className="source-info"><span className="source-name">{source.name}</span><span className="source-detail">{source.type === 'screen' && source.width && source.height ? `${source.width} × ${source.height}` : source.type === 'screen' ? 'DISPLAY' : 'WINDOW'}</span></div>
                 </button>
               ))}
             </div> : <div className="empty-sources" data-testid="empty-capture-sources">{refreshing ? 'Scanning for available displays and windows…' : 'No sources found for this category. Refresh to scan again.'}</div>}
@@ -586,6 +598,11 @@ function App() {
                   <option value="1080p">1080p · Full HD</option><option value="1440p">1440p · QHD</option><option value="4K">4K · Ultra HD</option>
                 </select><ChevronDown size={12} style={{ position: 'absolute', right: 9, top: 11, pointerEvents: 'none', color: '#707970' }} /></div>
               </div>
+              {selectedDisplayBelowTarget && selectedSource?.width && selectedSource.height && (
+                <div className="resolution-warning" role="status">
+                  This display is {selectedSource.width} × {selectedSource.height}; it cannot provide native {resolution} capture.
+                </div>
+              )}
               <div className="form-row">
                 <label className="field-label" htmlFor="frame-rate">Frame rate</label>
                 <div style={{ position: 'relative' }}><select id="frame-rate" className="select-control" value={fps} onChange={(event) => setFps(event.target.value)} data-testid="select-frame-rate">

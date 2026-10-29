@@ -203,32 +203,35 @@ export function AnnotationToolbar() {
           {recording.state === 'recording' ? (
             <button
               type="button"
-              className="annotation-record-button"
+              className="annotation-record-button has-label"
               aria-label="Pause recording"
               title="Pause recording"
               onClick={() => sendRecordingControl('pause')}
             >
               <Pause aria-hidden="true" size={17} fill="currentColor" />
+              <span>Pause</span>
             </button>
           ) : (
             <button
               type="button"
-              className="annotation-record-button"
+              className="annotation-record-button has-label"
               aria-label="Resume recording"
               title="Resume recording"
               onClick={() => sendRecordingControl('resume')}
             >
               <Play aria-hidden="true" size={17} fill="currentColor" />
+              <span>Resume</span>
             </button>
           )}
           <button
             type="button"
-            className="annotation-record-button is-stop"
+            className="annotation-record-button is-stop has-label"
             aria-label="Stop recording"
             title="Stop recording"
             onClick={() => sendRecordingControl('stop')}
           >
             <Square aria-hidden="true" size={15} fill="currentColor" />
+            <span>Stop</span>
           </button>
         </div>
       )}

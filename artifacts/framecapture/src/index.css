@@ -111,6 +111,7 @@ h1 { margin:7px 0 0; font-size:32px; line-height:1.1; letter-spacing:-.055em; fo
 .capture-column { display:grid; gap:15px; }
 .settings-panel { padding:20px 20px 18px; }
 .settings-title { margin-bottom:18px; }
+.resolution-warning { margin: -4px 0 10px; padding: 8px 10px; border-radius: 7px; color: #81583a; background: #f7eddd; font-size: 10px; line-height: 1.45; }
 .form-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:13px 0; }
 .field-label { font-size:11px; font-weight:700; }
 .field-hint { display:block; margin-top:3px; color:#858981; font:9px var(--app-font-mono); }

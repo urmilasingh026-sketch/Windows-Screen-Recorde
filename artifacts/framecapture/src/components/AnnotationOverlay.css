@@ -256,6 +256,19 @@
   transition: color .16s ease, background-color .16s ease, transform .16s ease;
 }
 
+.annotation-record-button.has-label {
+  width: auto;
+  min-width: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 9px;
+  font: 700 10px var(--app-font-sans);
+}
+
+.annotation-record-button.has-label.is-stop { min-width: 52px; }
+
 .annotation-record-button:hover {
   color: #fff;
   background: rgba(255, 255, 255, .15);
