@@ -1,6 +1,6 @@
 {
   "name": "@workspace/framecapture",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "A local Windows screen recorder with 4K and 60 FPS capture presets.",

@@ -372,8 +372,8 @@ async function openAnnotationOverlays(display) {
     action: "deny",
   }));
 
-  const toolbarWidth = Math.min(760, Math.max(400, bounds.width - 24));
-  const toolbarHeight = 72;
+  const toolbarWidth = Math.min(980, Math.max(400, bounds.width - 24));
+  const toolbarHeight = bounds.width < 900 ? 116 : 72;
   annotationToolbarWindow = new BrowserWindow({
     x: bounds.x + Math.round((bounds.width - toolbarWidth) / 2),
     y: bounds.y + 18,

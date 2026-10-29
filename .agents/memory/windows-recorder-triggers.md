@@ -8,3 +8,9 @@ For Windows recording started from the floating toolbox or system tray, the comm
 **Why:** Screen-capture APIs may require transient user activation, which an IPC message from another window does not provide. Electron also denies desktop capture if the app only grants the `media` permission. The user still explicitly starts the capture from the toolbox or tray.
 
 **How to apply:** Keep the selected source ID synchronized before accepting toolbox starts. Have the renderer signal readiness after subscribing to commands; once that signal arrives, do not gate delivery on `webContents.isLoading()` or a queued command can become stranded. Treat resolution/FPS as capture targets: compare target size with physical display pixels (`Display.size × scaleFactor`) and report the media track's actual settings instead of implying upscaling creates native detail. Verify capture and audio paths on Windows hardware before claiming they work on every device.
+
+The annotation toolbar is a separate, fixed-size Electron window. Its width must fit the drawing tools, recording status, and labeled Pause/Resume and Stop controls; on narrower displays, wrap the controls and increase the window height rather than letting the right edge clip them.
+
+**Why:** A recording timer can remain visible even when later flex items overflow the BrowserWindow, making recording controls appear missing.
+
+**How to apply:** When adding toolbar actions or labels, re-check the total rendered width and responsive layout at the Electron window's actual viewport size.

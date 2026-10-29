@@ -309,6 +309,16 @@
   .annotation-record-button { width: 31px; height: 34px; border-radius: 9px; }
 }
 
+@media (max-width: 900px) {
+  .annotation-toolbar-window .annotation-toolbar {
+    width: calc(100vw - 16px);
+    max-width: calc(100vw - 16px);
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .annotation-toolbar *,
   .annotation-toolbar *::before,
