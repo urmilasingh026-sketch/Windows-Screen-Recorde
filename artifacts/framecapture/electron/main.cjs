@@ -811,12 +811,21 @@ if (!app.requestSingleInstanceLock()) {
         : path.join(app.getPath("videos"), "FrameCapture");
     await fsp.mkdir(outputDirectory, { recursive: true });
 
+    const allowedCapturePermissions = new Set(["media", "display-capture"]);
+    const canAppRendererCapture = (webContents, permission) =>
+      webContents === mainWindow?.webContents &&
+      webContents?.getURL?.().startsWith("file://") &&
+      allowedCapturePermissions.has(permission);
+
+    // Electron checks display-capture separately from camera/microphone media.
+    // Allow both only for the trusted local app renderer that the user controls.
+    session.defaultSession.setPermissionCheckHandler(
+      (webContents, permission) =>
+        canAppRendererCapture(webContents, permission),
+    );
     session.defaultSession.setPermissionRequestHandler(
       (webContents, permission, callback) => {
-        const trustedAppRenderer =
-          webContents === mainWindow?.webContents &&
-          webContents.getURL().startsWith("file://");
-        callback(trustedAppRenderer && permission === "media");
+        callback(canAppRendererCapture(webContents, permission));
       },
     );
 
