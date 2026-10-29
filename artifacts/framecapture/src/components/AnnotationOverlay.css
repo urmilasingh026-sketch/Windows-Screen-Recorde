@@ -102,6 +102,8 @@
 .recording-toolbox-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #89948d; }
 .recording-toolbox-dot.is-recording { background: #f2415a; box-shadow: 0 0 0 3px rgba(242, 65, 90, .16); }
 .recording-toolbox-dot.is-paused { background: #ffc928; box-shadow: 0 0 0 3px rgba(255, 201, 40, .15); }
+.recording-toolbox-dot.is-error { background: #f2415a; box-shadow: 0 0 0 3px rgba(242, 65, 90, .16); }
+.recording-toolbox-state.has-error { color: #ff8791; cursor: help; }
 .recording-toolbox-actions { gap: 5px; -webkit-app-region: no-drag; }
 .recording-toolbox-button,
 .recording-toolbox-open {

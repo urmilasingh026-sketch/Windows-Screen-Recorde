@@ -7,4 +7,4 @@ For Windows recording started from the floating toolbox or system tray, the comm
 
 **Why:** Screen-capture APIs may require transient user activation, which an IPC message from another window does not provide. The user still explicitly starts the capture from the toolbox or tray.
 
-**How to apply:** Keep the selected source ID synchronized before accepting toolbox starts, and verify the capture and audio paths on Windows hardware before claiming they work on every device.
+**How to apply:** Keep the selected source ID synchronized before accepting toolbox starts. Have the renderer signal readiness after subscribing to commands; once that signal arrives, do not gate delivery on `webContents.isLoading()` or a queued command can become stranded. Verify capture and audio paths on Windows hardware before claiming they work on every device.

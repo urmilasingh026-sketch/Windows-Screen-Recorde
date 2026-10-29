@@ -28,7 +28,12 @@ let selectedSourceId;
 let outputDirectory;
 let annotationCanvasWindow;
 let annotationToolbarWindow;
-let latestRecordingState = { state: "idle", elapsedSeconds: 0 };
+let latestRecordingState = {
+  state: "idle",
+  elapsedSeconds: 0,
+  status: "Ready",
+  error: "",
+};
 
 if (process.platform === "win32") {
   app.setName("FrameCapture");
@@ -207,7 +212,7 @@ function sendRecordingCommand(command) {
     return;
   }
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (!rendererReady || mainWindow.webContents.isLoading()) {
+  if (!rendererReady) {
     queuedRecordingCommand = command;
     return;
   }
@@ -501,6 +506,10 @@ function registerIpcHandlers() {
         0,
         Math.min(24 * 60 * 60, Math.floor(status.elapsedSeconds)),
       ),
+      status:
+        typeof status.status === "string" ? status.status.slice(0, 140) : "",
+      error:
+        typeof status.error === "string" ? status.error.slice(0, 240) : "",
     };
     if (
       annotationToolbarWindow &&
@@ -518,6 +527,9 @@ function registerIpcHandlers() {
       );
     }
     updateTrayMenu();
+    if (status.state === "idle" && latestRecordingState.error) {
+      showMainWindow();
+    }
   });
 
   ipcMain.on("recording:renderer-ready", (event) => {

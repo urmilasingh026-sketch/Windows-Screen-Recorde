@@ -35,7 +35,7 @@ type FrameCaptureBridge = {
   openAnnotationOverlay(sourceId: string): Promise<void>;
   closeAnnotationOverlay(): Promise<void>;
   onExportProgress(callback: (progress: number) => void): () => void;
-  reportRecordingState(state: RecordState, elapsedSeconds: number): void;
+  reportRecordingState(state: RecordState, elapsedSeconds: number, status: string, error: string): void;
   onRecordingControl(callback: (command: RecordingCommand) => void): () => void;
   rendererReady(): void;
 };
@@ -134,8 +134,8 @@ function App() {
 
   useEffect(() => {
     if (!bridge) return;
-    bridge.reportRecordingState(state, elapsedSeconds);
-  }, [bridge, state, elapsedSeconds]);
+    bridge.reportRecordingState(state, elapsedSeconds, status, error);
+  }, [bridge, state, elapsedSeconds, status, error]);
 
   useEffect(() => {
     if (!bridge) return;
@@ -250,27 +250,41 @@ function App() {
       setStatus(fromToolbox ? 'Connecting to the selected screen…' : 'Choose a screen or window in the capture prompt…');
       const quality = resolution === '4K' ? { width: 3840, height: 2160 } : resolution === '1440p' ? { width: 2560, height: 1440 } : { width: 1920, height: 1080 };
       const targetFps = Number(fps);
-      const display = bridge && fromToolbox
-        ? await navigator.mediaDevices.getUserMedia({
-            video: {
+      let display: MediaStream;
+      if (bridge && fromToolbox) {
+        const desktopVideo = {
+          mandatory: {
+            chromeMediaSource: 'desktop',
+            chromeMediaSourceId: captureSourceId,
+            maxWidth: quality.width,
+            maxHeight: quality.height,
+            maxFrameRate: targetFps,
+          },
+        } as unknown as MediaTrackConstraints;
+        const desktopAudio = systemAudio
+          ? ({
               mandatory: {
                 chromeMediaSource: 'desktop',
                 chromeMediaSourceId: captureSourceId,
-                maxWidth: quality.width,
-                maxHeight: quality.height,
-                maxFrameRate: targetFps,
               },
-            },
-            audio: systemAudio
-              ? {
-                  mandatory: {
-                    chromeMediaSource: 'desktop',
-                    chromeMediaSourceId: captureSourceId,
-                  },
-                }
-              : false,
-          } as unknown as MediaStreamConstraints)
-        : await navigator.mediaDevices.getDisplayMedia({
+            } as unknown as MediaTrackConstraints)
+          : false;
+        try {
+          display = await navigator.mediaDevices.getUserMedia({
+            video: desktopVideo,
+            audio: desktopAudio,
+          });
+        } catch (captureError) {
+          if (!systemAudio) throw captureError;
+          const detail = captureError instanceof Error ? ` ${captureError.message}` : '';
+          setError(`System audio could not start. Retrying screen capture without system audio.${detail}`);
+          display = await navigator.mediaDevices.getUserMedia({
+            video: desktopVideo,
+            audio: false,
+          });
+        }
+      } else {
+        display = await navigator.mediaDevices.getDisplayMedia({
             video: {
               width: { ideal: quality.width, max: quality.width },
               height: { ideal: quality.height, max: quality.height },
@@ -278,6 +292,7 @@ function App() {
             },
             audio: systemAudio,
           });
+      }
       activeStream.current = display;
       const videoTrack = display.getVideoTracks()[0];
       if (videoTrack) videoTrack.contentHint = 'detail';

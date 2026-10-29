@@ -26,6 +26,8 @@ type RecordingCommand = 'start' | 'pause' | 'resume' | 'stop' | 'open';
 type RecordingStatus = {
   state: 'idle' | 'starting' | 'recording' | 'paused' | 'stopping';
   elapsedSeconds: number;
+  status?: string;
+  error?: string;
 };
 
 type AnnotationOverlayBridge = {
@@ -256,7 +258,9 @@ export function RecordingToolbar() {
     }
   };
 
-  const stateLabel = recording.state === 'starting'
+  const stateLabel = recording.error
+    ? 'Start failed'
+    : recording.state === 'starting'
     ? 'Starting…'
     : recording.state === 'recording'
       ? 'Recording'
@@ -269,9 +273,9 @@ export function RecordingToolbar() {
   return (
     <div className="recording-floating-toolbar" role="toolbar" aria-label="FrameCapture recording toolbox">
       <div className="recording-toolbox-brand">
-        <span className={`recording-toolbox-dot${recording.state === 'recording' ? ' is-recording' : recording.state === 'paused' ? ' is-paused' : ''}`} />
+        <span className={`recording-toolbox-dot${recording.error ? ' is-error' : recording.state === 'recording' ? ' is-recording' : recording.state === 'paused' ? ' is-paused' : ''}`} />
         <span className="recording-toolbox-name">FrameCapture</span>
-        <span className="recording-toolbox-state" role="status" aria-live="polite">{stateLabel}</span>
+        <span className={`recording-toolbox-state${recording.error ? ' has-error' : ''}`} role="status" aria-live="polite" title={recording.error || recording.status || stateLabel}>{stateLabel}</span>
         <time className="recording-toolbox-time">{formatRecordingTime(recording.elapsedSeconds)}</time>
       </div>
       <div className="recording-toolbox-actions" role="group" aria-label="Recording actions">
