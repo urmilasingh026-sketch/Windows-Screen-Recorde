@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld("frameCapture", {
     ipcRenderer.invoke("capture:select-source", sourceId),
   getOutputDirectory: () =>
     ipcRenderer.invoke("settings:get-output-directory"),
+  getWindowsCursorSettings: () =>
+    ipcRenderer.invoke("settings:get-windows-cursor"),
+  setWindowsCursorStyle: (style) =>
+    ipcRenderer.invoke("settings:set-windows-cursor", style),
   chooseOutputDirectory: () =>
     ipcRenderer.invoke("settings:choose-output-directory"),
   listRecordings: () => ipcRenderer.invoke("recordings:list"),

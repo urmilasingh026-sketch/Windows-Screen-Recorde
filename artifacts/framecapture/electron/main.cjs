@@ -10,7 +10,7 @@ const {
   shell,
   Tray,
 } = require("electron");
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const os = require("node:os");
@@ -50,6 +50,103 @@ const annotationTools = new Set([
 ]);
 
 const settingsPath = () => path.join(app.getPath("userData"), "settings.json");
+const windowsCursorStyles = new Set(["solid", "outline", "system"]);
+let activeWindowsCursorStyle = "solid";
+let windowsCursorOverrideApplied = false;
+let windowsCursorError = "";
+
+function getWindowsCursorScriptPath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "windows-cursor.ps1")
+    : path.join(__dirname, "windows-cursor.ps1");
+}
+
+function getWindowsCursorAssetPath(style) {
+  const cursorDirectory = app.isPackaged
+    ? path.join(process.resourcesPath, "cursors")
+    : path.join(__dirname, "cursors");
+  return path.join(cursorDirectory, `${style}.cur`);
+}
+
+function runWindowsCursorAction(action, style) {
+  if (process.platform !== "win32") {
+    throw new Error(
+      "Changing the Windows pointer is available only in the Windows desktop app.",
+    );
+  }
+
+  const args = [
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    getWindowsCursorScriptPath(),
+    "-Action",
+    action,
+  ];
+  if (action === "apply") {
+    args.push("-CursorPath", getWindowsCursorAssetPath(style));
+  }
+
+  const result = spawnSync("powershell.exe", args, {
+    encoding: "utf8",
+    timeout: 10000,
+    windowsHide: true,
+  });
+  if (result.error) {
+    throw new Error(`The Windows pointer helper could not run: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    const detail = String(result.stderr || "")
+      .trim()
+      .split(/\r?\n/)
+      .filter((line) => line.trim() && !line.trim().startsWith("At "))
+      .slice(-2)
+      .join(" ");
+    throw new Error(
+      detail ||
+        `Windows could not update the pointer (helper exit code ${result.status ?? "unknown"}).`,
+    );
+  }
+}
+
+function setWindowsCursorStyle(style) {
+  if (!windowsCursorStyles.has(style)) {
+    throw new Error("Choose a supported Windows pointer style.");
+  }
+
+  if (style === "system") {
+    if (windowsCursorOverrideApplied) {
+      runWindowsCursorAction("restore");
+      windowsCursorOverrideApplied = false;
+    }
+    activeWindowsCursorStyle = "system";
+    windowsCursorError = "";
+    return;
+  }
+
+  runWindowsCursorAction("apply", style);
+  windowsCursorOverrideApplied = true;
+  activeWindowsCursorStyle = style;
+  windowsCursorError = "";
+}
+
+function restoreWindowsSystemCursor() {
+  if (process.platform !== "win32" || !windowsCursorOverrideApplied) return;
+  runWindowsCursorAction("restore");
+  windowsCursorOverrideApplied = false;
+  activeWindowsCursorStyle = "system";
+  windowsCursorError = "";
+}
+
+function getWindowsCursorSettings() {
+  return {
+    supported: process.platform === "win32",
+    style: activeWindowsCursorStyle,
+    error: windowsCursorError,
+  };
+}
 
 async function readSettings() {
   try {
@@ -607,6 +704,46 @@ function registerIpcHandlers() {
     return outputDirectory;
   });
 
+  ipcMain.handle("settings:get-windows-cursor", async (event) => {
+    assertTrustedSender(event);
+    return getWindowsCursorSettings();
+  });
+
+  ipcMain.handle("settings:set-windows-cursor", async (event, style) => {
+    assertTrustedSender(event);
+    if (process.platform !== "win32") {
+      throw new Error(
+        "Changing the Windows pointer is available only in the Windows desktop app.",
+      );
+    }
+    if (typeof style !== "string" || !windowsCursorStyles.has(style)) {
+      throw new Error("Choose a supported Windows pointer style.");
+    }
+
+    const previousStyle = activeWindowsCursorStyle;
+    try {
+      setWindowsCursorStyle(style);
+      const settings = await readSettings();
+      await saveSettings({ ...settings, cursorStyle: style });
+      return getWindowsCursorSettings();
+    } catch (error) {
+      windowsCursorError =
+        error instanceof Error ? error.message : "The Windows pointer could not be updated.";
+      if (activeWindowsCursorStyle !== previousStyle) {
+        try {
+          setWindowsCursorStyle(previousStyle);
+        } catch (restoreError) {
+          windowsCursorError = `${
+            restoreError instanceof Error
+              ? restoreError.message
+              : "The previous pointer style could not be restored."
+          }`;
+        }
+      }
+      throw error;
+    }
+  });
+
   ipcMain.handle("settings:choose-output-directory", async (event) => {
     assertTrustedSender(event);
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -833,11 +970,28 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     const settings = await readSettings();
+    activeWindowsCursorStyle =
+      typeof settings.cursorStyle === "string" &&
+      windowsCursorStyles.has(settings.cursorStyle)
+        ? settings.cursorStyle
+        : "solid";
     outputDirectory =
       typeof settings.outputDirectory === "string" && settings.outputDirectory
         ? settings.outputDirectory
         : path.join(app.getPath("videos"), "FrameCapture");
     await fsp.mkdir(outputDirectory, { recursive: true });
+    if (
+      process.platform === "win32" &&
+      activeWindowsCursorStyle !== "system"
+    ) {
+      try {
+        setWindowsCursorStyle(activeWindowsCursorStyle);
+      } catch (error) {
+        windowsCursorError =
+          error instanceof Error ? error.message : "The Windows pointer could not be updated.";
+        console.error("Could not apply the FrameCapture Windows pointer:", error);
+      }
+    }
 
     const allowedCapturePermissions = new Set(["media", "display-capture"]);
     const canAppRendererCapture = (webContents, permission) =>
@@ -911,9 +1065,29 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   isQuitting = true;
+  try {
+    restoreWindowsSystemCursor();
+  } catch (error) {
+    windowsCursorError =
+      error instanceof Error ? error.message : "The Windows pointer could not be restored.";
+    console.error("Could not restore the Windows pointer:", error);
+    dialog.showErrorBox(
+      "Windows pointer could not be restored",
+      "FrameCapture could not restore your previous Windows pointer. Open FrameCapture again and choose “Windows default” to retry.",
+    );
+  }
   if (tray && !tray.isDestroyed()) tray.destroy();
   if (recordingToolbarWindow && !recordingToolbarWindow.isDestroyed()) {
     recordingToolbarWindow.destroy();
   }
   destroyAnnotationOverlays();
+});
+
+process.on("exit", () => {
+  if (process.platform !== "win32" || !windowsCursorOverrideApplied) return;
+  try {
+    runWindowsCursorAction("restore");
+  } catch {
+    // The normal quit handler reports restoration failures before the process exits.
+  }
 });

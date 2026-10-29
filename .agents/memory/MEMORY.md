@@ -1,2 +1,4 @@
 - [Windows installers on Replit](windows-installer-builds.md) — build the app directory first; compile the user-scope NSIS installer natively to avoid Wine.
 - [Windows recorder triggers](windows-recorder-triggers.md) — toolbox commands arrive in another window; use Electron desktop capture for starts without main-window activation.
+- [Windows system cursor lifecycle](windows-system-cursor.md) — global pointer changes stay temporary and restore the saved Windows scheme when FrameCapture quits.
+- [Workspace Git guard](workspace-git-guard.md) — prefix intentional Git writes with `DANGEROUSLY_ALLOW_GIT=1` after checking the branch and tree.

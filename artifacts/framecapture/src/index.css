@@ -120,6 +120,13 @@ h1 { margin:7px 0 0; font-size:32px; line-height:1.1; letter-spacing:-.055em; fo
 .divider { height:1px; background:#e8e5dc; margin:16px 0; }
 .toggle-row { display:flex; justify-content:space-between; align-items:center; padding:7px 0; }
 .annotation-setting { margin-top:7px; padding-top:12px; border-top:1px solid #e8e5dc; }
+.cursor-setting { margin-top:10px; padding-top:12px; border-top:1px solid #e8e5dc; }
+.cursor-form-row { margin:0; }
+.cursor-label { min-width:0; }
+.cursor-picker { display:flex; align-items:center; gap:8px; }
+.cursor-preview { width:28px; height:28px; object-fit:contain; image-rendering:auto; }
+.cursor-note { margin:5px 0 0; color:#858981; font-size:9px; line-height:1.5; }
+.cursor-note.error { color:#a4463e; }
 .toggle-copy { font-size:11px; font-weight:700; }
 .toggle-copy small { display:block; color:#848980; font-size:9px; font-weight:500; margin-top:3px; line-height:1.4; }
 .switch { width:34px; height:20px; padding:2px; border:0; border-radius:20px; background:#d6d8ce; transition:background .18s; }

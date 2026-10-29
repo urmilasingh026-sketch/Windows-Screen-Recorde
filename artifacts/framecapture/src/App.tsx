@@ -21,10 +21,14 @@ import { AnnotationCanvas, AnnotationToolbar, RecordingToolbar } from './compone
 type Source = { id: string; name: string; type: 'screen' | 'window'; thumbnail: string; displayId?: string; width?: number; height?: number };
 type Recording = { id: string; name: string; path: string; createdAt: string; size: number; duration: number };
 type RecordingCommand = 'start' | 'pause' | 'resume' | 'stop';
+type WindowsCursorStyle = 'solid' | 'outline' | 'system';
+type WindowsCursorSettings = { supported: boolean; style: WindowsCursorStyle; error: string };
 type FrameCaptureBridge = {
   getSources(): Promise<Source[]>;
   selectSource(id: string): Promise<void>;
   getOutputDirectory(): Promise<string>;
+  getWindowsCursorSettings(): Promise<WindowsCursorSettings>;
+  setWindowsCursorStyle(style: WindowsCursorStyle): Promise<WindowsCursorSettings>;
   chooseOutputDirectory(): Promise<string | null>;
   listRecordings(): Promise<Recording[]>;
   revealRecording(path: string): Promise<void>;
@@ -67,6 +71,12 @@ function App() {
   const [microphone, setMicrophone] = useState(false);
   const [systemAudio, setSystemAudio] = useState(true);
   const [annotationsEnabled, setAnnotationsEnabled] = useState(false);
+  const [cursorSettings, setCursorSettings] = useState<WindowsCursorSettings>({
+    supported: false,
+    style: 'solid',
+    error: '',
+  });
+  const [savingCursorStyle, setSavingCursorStyle] = useState(false);
   const [directory, setDirectory] = useState('Loading output location…');
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [state, setState] = useState<RecordState>('idle');
@@ -124,6 +134,12 @@ function App() {
     void loadSources();
     void refreshRecordings();
     void bridge.getOutputDirectory().then(setDirectory).catch(() => setDirectory('Output folder unavailable'));
+    void bridge.getWindowsCursorSettings().then(setCursorSettings).catch((reason) => {
+      setCursorSettings((current) => ({
+        ...current,
+        error: reason instanceof Error ? reason.message : 'Windows pointer settings could not be loaded.',
+      }));
+    });
   }, [bridge, loadSources, refreshRecordings]);
 
   useEffect(() => {
@@ -174,6 +190,27 @@ function App() {
       const chosen = await bridge.chooseOutputDirectory();
       if (chosen) { setDirectory(chosen); setStatus('Output folder updated'); }
     } catch { setError('The output folder could not be changed.'); }
+  };
+
+  const chooseWindowsCursorStyle = async (style: WindowsCursorStyle) => {
+    if (!bridge || !cursorSettings.supported || savingCursorStyle) return;
+    setSavingCursorStyle(true);
+    try {
+      const updated = await bridge.setWindowsCursorStyle(style);
+      setCursorSettings(updated);
+      setStatus(
+        style === 'system'
+          ? 'Your Windows pointer has been restored'
+          : `Windows pointer changed to ${style === 'outline' ? 'outlined' : 'solid'}`,
+      );
+    } catch (reason) {
+      setCursorSettings((current) => ({
+        ...current,
+        error: reason instanceof Error ? reason.message : 'The Windows pointer could not be updated.',
+      }));
+    } finally {
+      setSavingCursorStyle(false);
+    }
   };
 
   const stopTracks = () => {
@@ -631,6 +668,48 @@ function App() {
               <div className="toggle-row annotation-setting">
                 <div className="toggle-copy">Draw on screen <small>{canAnnotate ? 'Show annotation tools while recording' : 'Windows desktop app · screen capture only'}</small></div>
                 <button type="button" role="switch" aria-checked={annotationsEnabled} aria-label="Draw on screen" className={`switch ${annotationsEnabled ? 'on' : ''}`} onClick={() => setAnnotationsEnabled(!annotationsEnabled)} disabled={!canAnnotate || active} data-testid="toggle-screen-annotations"><span className="switch-thumb" /></button>
+              </div>
+              <div className="cursor-setting">
+                <div className="form-row cursor-form-row">
+                  <div className="cursor-label">
+                    <label className="field-label" htmlFor="windows-cursor-style">Windows pointer</label>
+                    <small className="field-hint">Change the arrow across your screen</small>
+                  </div>
+                  <div className="cursor-picker">
+                    {cursorSettings.style !== 'system' && (
+                      <img
+                        className="cursor-preview"
+                        src={`cursors/${cursorSettings.style}.png`}
+                        alt=""
+                        aria-hidden="true"
+                      />
+                    )}
+                    <select
+                      id="windows-cursor-style"
+                      className="select-control"
+                      value={cursorSettings.style}
+                      onChange={(event) => void chooseWindowsCursorStyle(event.target.value as WindowsCursorStyle)}
+                      disabled={!bridge || !cursorSettings.supported || savingCursorStyle}
+                      data-testid="select-windows-cursor"
+                    >
+                      <option value="solid">Solid black</option>
+                      <option value="outline">Black outline</option>
+                      <option value="system">Windows default</option>
+                    </select>
+                  </div>
+                </div>
+                <p
+                  className={`cursor-note${cursorSettings.error ? ' error' : ''}`}
+                  role={cursorSettings.error ? 'alert' : 'note'}
+                  data-testid="note-windows-cursor"
+                >
+                  {cursorSettings.error ||
+                    (!bridge
+                      ? 'Available in the installed Windows app; browser preview cannot change your system pointer.'
+                      : !cursorSettings.supported
+                        ? 'Changing the system pointer is available only in the Windows desktop app.'
+                        : 'Applies across Windows while FrameCapture is running. Quit from the tray to restore your pointer.')}
+                </p>
               </div>
               <div className="capability-note" data-testid="note-hardware-capability"><AlertTriangle size={14} /><span>Resolution and FPS are capture targets. The status line shows what the display and PC actually provide.</span></div>
             </section>

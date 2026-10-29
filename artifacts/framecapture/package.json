@@ -97,6 +97,18 @@
     ],
     "extraResources": [
       {
+        "from": "electron/windows-cursor.ps1",
+        "to": "windows-cursor.ps1"
+      },
+      {
+        "from": "electron/cursors/outline.cur",
+        "to": "cursors/outline.cur"
+      },
+      {
+        "from": "electron/cursors/solid.cur",
+        "to": "cursors/solid.cur"
+      },
+      {
         "from": "generated-artifacts/ffmpeg.exe",
         "to": "ffmpeg.exe"
       },
